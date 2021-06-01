@@ -129,8 +129,9 @@ class HartmannPermutationConstrained(Hartmann):
     _optimal_value = 1.0 
     
     def __init__(
-        self, noise_std: Optional[float] = None, negate: bool = False
+        self, dim: int = 6, noise_std: Optional[float] = None, negate: bool = False
     ) -> None:
+        self.dim = dim,
         super().__init__(noise_std=noise_std, negate=negate)
 
     def evaluate_true(self, X: Tensor) -> Tensor:

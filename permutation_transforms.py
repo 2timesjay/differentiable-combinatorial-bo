@@ -229,4 +229,5 @@ class PerturbedRankTransform(InputTransform, Module):
         if X_projected.ndim == 3:
             X_constrained = X_constrained.reshape(X_projected.shape[0], X_projected.shape[1], len(self.indices))
         X_projected[..., self.indices] = X_constrained
-        return torch.clamp((X_projected)/self.dim, 0.0, 1.0)
+        return X_projected/self.dim
+#         return torch.clamp((X_projected)/self.dim, 0.0, 1.0)
