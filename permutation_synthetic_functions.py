@@ -188,4 +188,104 @@ class Jennaton(SyntheticTestFunction):
         opt_val = 0.1
         worst_val = 2.4
         return jennaton_evaluation(self.rank_one_hot(X))
+
+
+import tsplib95 as tsp
+from math import cos, acos, pi
+
+def load_tsp_data(filename):
+    return tsp.load(filename)
+
+def get_geo_coords(tsp_data):
+    x, y = zip(*tsp_data.node_coords.values())
+    latitude, longitude = [e for e in x], [e for e in y]
+    for i in range(len(x)):
+    #     PI = 3.141592
+        deg = int(x[i])
+        minute = x[i] - deg
+        latitude[i] = pi * (deg + 5.0 * minute / 3.0 ) / 180.0
+        deg = int(y[i])
+        minute = y[i] - deg
+        longitude[i] = pi * (deg + 5.0 * minute / 3.0 ) / 180.0
+    return latitude, longitude
+    
+def get_geo_distance(i, j, coords):
+    latitude, longitude = coords
+    RRR = 6378.388
+    q1 = cos( longitude[i] - longitude[j] )
+    q2 = cos( latitude[i] - latitude[j] )
+    q3 = cos( latitude[i] + latitude[j] )
+    dij = (int) ( RRR * acos( 0.5*((1.0+q1)*q2 - (1.0-q1)*q3) ) + 1.0)
+    return dij
+
+def calculate_tsp_geo_distance(permutation, coords):
+    dist_sum = 0
+    pairs = zip(permutation[:-1], permutation[1:])
+    for pair in pairs:
+        dist_sum += get_geo_distance(pair[0], pair[1], coords)
+    return dist_sum
+
+class TSPBurma14(SyntheticTestFunction):
+    _optimal_value = 1.0  #???
+    _check_grad_at_opt: bool = False
+
+    def __init__(
+        self, dim: int = 14, noise_std: Optional[float] = None, negate: bool = True
+    ) -> None:
+        self.dim = dim
+        self._bounds = [(0, 1) for _ in range(self.dim)]
+        self._optimizers = [tuple(range(0, self.dim))]
+        
+        self.tsp = load_tsp_data("..\\..\\tsp\\burma14.tsp")
+        self.coords = get_geo_coords(self.tsp)
+        super().__init__(noise_std=noise_std, negate=negate)
+        self.hard_rank = lambda inputs: inputs.argsort(-1).argsort(-1).long()
+        
+    def evaluate_true(self, X: Tensor) -> Tensor:
+        ranked_X = self.hard_rank(X)
+        dists = []
+        for row in ranked_X:
+            dist = calculate_tsp_geo_distance(row, self.coords)
+            dists.append((dist - 5300.)/2000.)
+        return torch.Tensor(dists)
+     
+def get_edge_distance(i, j, edge_weights):
+    # List of Lists  in upper-triangular format excluding diagonal
+    if j > i:
+        return edge_weights[i][j-i-1]
+    else:
+        return edge_weights[j][i-j-1]
+
+def calculate_tsp_edge_distance(permutation, edge_weights):
+    dist_sum = 0
+    pairs = zip(permutation[:-1], permutation[1:])
+    for pair in pairs:
+        dist_sum += get_edge_distance(pair[0], pair[1], edge_weights)
+    return dist_sum
+
+class TSPBayg29(SyntheticTestFunction):
+    _optimal_value = 1.0  #???
+    _check_grad_at_opt: bool = False
+
+    def __init__(
+        self, dim: int = 29, noise_std: Optional[float] = None, negate: bool = True
+    ) -> None:
+        self.dim = dim
+        self._bounds = [(0, 1) for _ in range(self.dim)]
+        self._optimizers = [tuple(range(0, self.dim))]
+        self.tsp = load_tsp_data("..\\..\\tsp\\bayg29.tsp")
+        self.edge_weights = self.tsp.edge_weights
+        super().__init__(noise_std=noise_std, negate=negate)
+        self.hard_rank = lambda inputs: inputs.argsort(-1).argsort(-1).long()
+        
+    def evaluate_true(self, X: Tensor) -> Tensor:
+        ranked_X = self.hard_rank(X)
+        dists = []
+        for row in ranked_X:
+            dist = calculate_tsp_edge_distance(row, self.edge_weights)
+#             dists.append(dist)
+            dists.append(((dist - 5000)/3000.))
+        return torch.Tensor(dists)
+        
+
         

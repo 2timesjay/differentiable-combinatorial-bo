@@ -37,7 +37,6 @@ OPTIMIZATION_KWARGS = {
 device = "cpu"
 dtype = torch.double
 
-verbose = False
 def initialize_ranking_model(train_x, train_obj, model_type="STGP", noise_se=0.0, state_dict=None, transform=None):
     # define models for objective and constraint
     input_transform = transform
@@ -62,6 +61,7 @@ def generate_test_run(
     noise_se: float = 0.0,
     mc_samples: int = DEFAULT_MC_SAMPLES,
     optimization_kwargs = OPTIMIZATION_KWARGS,
+    verbose = False,
 ):
 
     def generate_initial_data(n=10):
