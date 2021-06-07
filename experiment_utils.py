@@ -1,3 +1,4 @@
+from __future__ import annotations
 import torch
 
 from botorch.models import FixedNoiseGP, SingleTaskGP
@@ -32,6 +33,135 @@ OPTIMIZATION_KWARGS = {
     "options":{"batch_limit": 5, "maxiter": 50},
 }
 
+from typing import Any, Callable, Dict, List, Optional, Tuple, Union
+
+import torch
+from botorch.acquisition.acquisition import (
+    AcquisitionFunction,
+)
+from botorch.generation.gen import gen_candidates_torch
+from botorch.logging import logger
+from botorch.optim.initializers import (
+    gen_batch_initial_conditions,
+)
+from botorch.optim.stopping import ExpMAStoppingCriterion
+from torch import Tensor
+
+
+def optimize_acqf_torch(
+    acq_function: AcquisitionFunction,
+    bounds: Tensor,
+    q: int,
+    num_restarts: int,
+    raw_samples: Optional[int] = None,
+    fixed_features: Optional[Dict[int, float]] = None,
+    options: Optional[Dict[str, Union[bool, float, int, str]]] = None,
+    return_best_only: bool = True,
+    sequential: bool = False,
+    **kwargs: Any,
+) -> Tuple[Tensor, Tensor]:
+    r"""Generate a set of candidates via multi-start optimization.
+    Args:
+        acq_function: An AcquisitionFunction.
+        bounds: A `2 x d` tensor of lower and upper bounds for each column of `X`.
+        q: The number of candidates.
+        num_restarts: The number of starting points for multistart acquisition
+            function optimization.
+        raw_samples: The number of samples for initialization. This is required
+            if `batch_initial_conditions` is not specified.
+        options: Options for candidate generation.
+        sequential: If False, uses joint optimization, otherwise uses sequential
+            optimization.
+        kwargs: Additonal keyword arguments.
+    Returns:
+        A two-element tuple containing
+        - a `(num_restarts) x q x d`-dim tensor of generated candidates.
+        - a tensor of associated acquisition values. If `sequential=False`,
+            this is a `(num_restarts)`-dim tensor of joint acquisition values
+            (with explicit restart dimension if `return_best_only=False`). If
+            `sequential=True`, this is a `q`-dim tensor of expected acquisition
+            values conditional on having observed canidates `0,1,...,i-1`.
+    Example:
+        >>> # generate `q=2` candidates jointly using 20 random restarts
+        >>> # and 512 raw samples
+        >>> candidates, acq_value = optimize_acqf_torch(qEI, bounds, 2, 20, 512)
+        >>> generate `q=3` candidates sequentially using 15 random restarts
+        >>> # and 256 raw samples
+        >>> qEI = qExpectedImprovement(model, best_f=0.2)
+        >>> bounds = torch.tensor([[0.], [1.]])
+        >>> candidates, acq_value_list = optimize_acqf_torch(
+        >>>     qEI, bounds, 3, 15, 256, sequential=True
+        >>> )
+    """
+    if sequential and q > 1:
+        candidate_list, acq_value_list = [], []
+        base_X_pending = acq_function.X_pending
+        for i in range(q):
+            candidate, acq_value = optimize_acqf_torch(
+                acq_function=acq_function,
+                bounds=bounds,
+                q=1,
+                num_restarts=num_restarts,
+                raw_samples=raw_samples,
+                options=options or {},
+                fixed_features=fixed_features,
+                return_best_only=True,
+                sequential=False,
+            )
+            candidate_list.append(candidate)
+            acq_value_list.append(acq_value)
+            candidates = torch.cat(candidate_list, dim=-2)
+            acq_function.set_X_pending(
+                torch.cat([base_X_pending, candidates], dim=-2)
+                if base_X_pending is not None
+                else candidates
+            )
+            logger.info(f"Generated sequential candidate {i+1} of {q}")
+        # Reset acq_func to previous X_pending state
+        acq_function.set_X_pending(base_X_pending)
+        return candidates, torch.stack(acq_value_list)
+
+    options = options or {}
+
+    batch_initial_conditions = gen_batch_initial_conditions(
+        acq_function=acq_function,
+        bounds=bounds,
+        q=q,
+        num_restarts=num_restarts,
+        raw_samples=raw_samples,
+        options=options,
+    )
+
+    batch_limit: int = options.get("batch_limit", num_restarts)
+    batch_candidates_list: List[Tensor] = []
+    batch_acq_values_list: List[Tensor] = []
+    batched_ics = batch_initial_conditions.split(batch_limit)
+    for i, batched_ics_ in enumerate(batched_ics):
+        # optimize using random restart optimization
+        batch_candidates_curr, batch_acq_values_curr = gen_candidates_torch(
+            initial_conditions=batched_ics_,
+            acquisition_function=acq_function,
+            lower_bounds=bounds[0],
+            upper_bounds=bounds[1],
+            options={
+                k: v
+                for k, v in options.items()
+                if k not in ("init_batch_limit", "batch_limit", "nonnegative")
+            },
+            verbose=options.get("torch_verbose", False),
+        )
+        batch_candidates_list.append(batch_candidates_curr)
+        batch_acq_values_list.append(batch_acq_values_curr)
+        logger.info(f"Generated candidate batch {i+1} of {len(batched_ics)}.")
+    batch_candidates = torch.cat(batch_candidates_list)
+    batch_acq_values = torch.cat(batch_acq_values_list)
+
+    if return_best_only:
+        best = torch.argmax(batch_acq_values.view(-1), dim=0)
+        batch_candidates = batch_candidates[best]
+        batch_acq_values = batch_acq_values[best]
+
+    return batch_candidates, batch_acq_values
 
 # device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 device = "cpu"
@@ -81,10 +211,11 @@ def generate_test_run(
 
     bounds = torch.tensor([[0.0] * dim, [1.0] * dim], device=device, dtype=dtype)
 
-    def optimize_acqf_and_get_observation(acq_func):
+    def optimize_acqf_and_get_observation(acq_func, optimize_acqf_type=None):
         """Optimizes the acquisition function, and returns a new candidate and a noisy observation."""
+        optimize_acqf_func = optimize_acqf_torch if optimize_acqf_type == "torch" else optimize_acqf
         # optimize
-        candidates, _ = optimize_acqf(
+        candidates, _ = optimize_acqf_func(
             acq_function=acq_func,
             bounds=bounds,
             q=batch_size,
@@ -106,7 +237,7 @@ def generate_test_run(
         return best_random
 
 
-    def run_benchmark(initial_data, model_initializer, label):
+    def run_benchmark(initial_data, model_initializer, label, **kwargs):
         best_observed_value_by_batch = []
 
         # call helper functions to generate initial training data and initialize model
@@ -134,7 +265,7 @@ def generate_test_run(
 
             # optimize and get new observation
             t_opt_start = time.time()
-            new_x, new_obj = optimize_acqf_and_get_observation(acqf)
+            new_x, new_obj = optimize_acqf_and_get_observation(acqf, **kwargs)
             t_opt_end = time.time()
 
             # update training points
@@ -164,14 +295,15 @@ def generate_test_run(
         return best_observed_value_by_batch
 
 
-    def run_trials(n_trials, model_initializer, label, initial_data_list):
+    def run_trials(n_trials, model_initializer, label, initial_data_list, **kwargs):
         values_by_batch_by_trial = []
         for trial in range(n_trials):
             print(f"\nTrial {trial+1:>2} of {n_trials} ", end="")
             values_by_batch = run_benchmark(
                 initial_data=initial_data_list[trial], 
                 model_initializer=model_initializer, 
-                label=label
+                label=label,
+                **kwargs
             )
             values_by_batch_by_trial.append(values_by_batch)
         return values_by_batch_by_trial

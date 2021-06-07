@@ -183,6 +183,7 @@ class PerturbedRankTransform(InputTransform, Module):
         indices: List[int],
         num_samples: int,
         sigma: float,
+        noise: str="gumbel",
         dim: Optional[int] = None,
         transform_on_train: bool = True,
         transform_on_eval: bool = True,
@@ -210,7 +211,7 @@ class PerturbedRankTransform(InputTransform, Module):
             optimizer,
             num_samples=num_samples,
             sigma=sigma,
-            noise='gumbel',
+            noise=noise,
             batched=True,
             device=device,
         )
@@ -229,5 +230,5 @@ class PerturbedRankTransform(InputTransform, Module):
         if X_projected.ndim == 3:
             X_constrained = X_constrained.reshape(X_projected.shape[0], X_projected.shape[1], len(self.indices))
         X_projected[..., self.indices] = X_constrained
-        return X_projected/self.dim
-#         return torch.clamp((X_projected)/self.dim, 0.0, 1.0)
+#         return X_projected/self.dim
+        return torch.clamp((X_projected)/self.dim, 0.0, 1.0)

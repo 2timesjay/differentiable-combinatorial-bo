@@ -131,8 +131,8 @@ class HartmannPermutationConstrained(Hartmann):
     def __init__(
         self, dim: int = 6, noise_std: Optional[float] = None, negate: bool = False
     ) -> None:
-        self.dim = dim,
         super().__init__(noise_std=noise_std, negate=negate)
+        self.dim = dim
 
     def evaluate_true(self, X: Tensor) -> Tensor:
         # size of intersection of top k in X with indices of top-k in target_perm.

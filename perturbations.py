@@ -177,6 +177,7 @@ def perturbed(func=None,
 
             @staticmethod
             def backward(ctx, dy):
+#                 print("backward perturbation")
                 # Pull saved tensors
                 original_input_shape = ctx.original_input_shape
                 perturbed_input, perturbed_output, noise_gradient = ctx.saved_tensors
