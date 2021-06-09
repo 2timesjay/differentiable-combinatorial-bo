@@ -204,11 +204,10 @@ def perturbed(func=None,
     return wrapper
 
 def get_presampled_noises(
-    input_tensor,
+    input_shape,
     num_samples = 1000,
     noise = _NORMAL,
 ):
-    input_shape = input_tensor.shape  # [B, D1, ... Dk], k >= 1
     perturbed_input_shape = [num_samples] + list(input_shape)
     noises = sample_noise_with_gradients(noise, perturbed_input_shape)
     return noises

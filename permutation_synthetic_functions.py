@@ -6,6 +6,7 @@ from torch import Tensor
 from botorch.test_functions.synthetic import Hartmann
 from botorch.test_functions.synthetic import SyntheticTestFunction
 
+from permutation_transforms import RankRoundTransform
 
 # device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 device = "cpu"

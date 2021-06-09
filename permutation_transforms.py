@@ -184,6 +184,8 @@ class PerturbedRankTransform(InputTransform, Module):
         num_samples: int,
         sigma: float,
         noise: str="gumbel",
+        fixed_noise: bool=False,
+        fixed_noise_shape = None,
         dim: Optional[int] = None,
         transform_on_train: bool = True,
         transform_on_eval: bool = True,
@@ -206,15 +208,27 @@ class PerturbedRankTransform(InputTransform, Module):
         self.transform_on_preprocess = transform_on_preprocess
         self.register_buffer("indices", torch.tensor(indices, device=device, dtype=torch.long))
 #         optimizer = lambda input: is_top_k(ranks(input), K)
+        if fixed_noise:
+            self.presampled_noises = perturbations.get_presampled_noises(fixed_noise_shape, num_samples=num_samples, noise=noise) 
         optimizer = ranks
-        pert_ranks = perturbations.perturbed(
-            optimizer,
-            num_samples=num_samples,
-            sigma=sigma,
-            noise=noise,
-            batched=True,
-            device=device,
-        )
+        if fixed_noise:
+            pert_ranks = perturbations.fixed_noise_perturbed(
+                optimizer, 
+                presampled_noises=self.presampled_noises, 
+                num_samples=num_samples, 
+                sigma=sigma, 
+                batched=True,
+                device=device,
+            )
+        else:
+            pert_ranks = perturbations.perturbed(
+                optimizer,
+                num_samples=num_samples,
+                sigma=sigma,
+                noise=noise,
+                batched=True,
+                device=device,
+            )
         self.layer = pert_ranks
 
     def transform(self, X: Tensor) -> Tensor:
